@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+
+# PDF ต้นฉบับ (ใหญ่ 173M — แชร์ผ่าน Drive แยก ไม่ขึ้น repo)
+Data/*.pdf
+
+# ความลับ — ห้าม commit
+.env
+.env.local
+*.key
+scratch_render/
+
+# generated index artifacts (สร้างใหม่ได้จาก chunks)
+data/chroma/
+data/bm25.pkl

@@ -1,0 +1,26 @@
+# RAG pipeline — Chatbot คณะ IT KMITL
+# ติดตั้ง: python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
+
+# --- PDF + render ---
+pymupdf              # เปิด/มอง/ตรวจ/render PDF (ไม่พึ่ง poppler)
+
+# --- OCR (Typhoon OCR รันโลคัลผ่าน Ollama) ---
+typhoon-ocr          # prompt/param เฉพาะของโมเดล + client
+# ต้องมี Ollama + โมเดล: ollama pull scb10x/typhoon-ocr1.5-3b
+
+# --- Thai NLP ---
+pythainlp            # normalize + ตัดคำ newmm
+
+# --- Embedding + Vector DB (ขั้น index เป็นต้นไป) ---
+# ก่อนลงกลุ่มนี้ ถ้ามี GPU NVIDIA แนะนำลง torch แบบ CUDA ก่อน (เร็วกว่า CPU มาก):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# หมายเหตุ: BAAI/bge-m3 มีแต่ .bin — ถ้า transformers ใหม่ฟ้อง torch<2.6 ให้แปลงเป็น
+# safetensors ในเครื่อง (ดู memory: index-setup-gotchas) หรืออัป torch>=2.6
+FlagEmbedding        # BGE-M3 embedding + BGE-reranker-v2-m3
+chromadb             # vector DB (persistent local)
+rank-bm25            # keyword search สำหรับ hybrid
+
+# --- API ---
+fastapi
+uvicorn[standard]
+pydantic
