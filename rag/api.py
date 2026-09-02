@@ -62,7 +62,8 @@ class SearchRequest(BaseModel):
 class ChunkOut(BaseModel):
     text: str
     doc: str
-    page: int | None
+    page: int | None                 # เลขหน้าที่พิมพ์บนกระดาษ (อาจ null ถ้า OCR ไม่เจอ)
+    page_index: int                  # ตำแหน่งหน้าใน PDF (0-based) — มีเสมอ ใช้ locate ได้ชัวร์
     course_code: str | None = None
     chunk_type: str
     score: float
@@ -70,7 +71,8 @@ class ChunkOut(BaseModel):
 
 class Citation(BaseModel):
     doc: str
-    page: int | None
+    page: int | None                 # เลขหน้าพิมพ์ (ถ้ามี)
+    page_index: int                  # ตำแหน่งหน้าใน PDF (0-based) — fallback ที่เชื่อถือได้
 
 
 class SearchResponse(BaseModel):
@@ -91,7 +93,8 @@ def build_prompt(question: str, chunks: list[ChunkOut]) -> str:
     """ประกอบ prompt grounded พร้อมส่งเข้า LLM (context มี citation กำกับต่อ chunk)"""
     blocks = []
     for i, c in enumerate(chunks, 1):
-        src = f"[{i}] ({c.doc} หน้า {c.page if c.page is not None else '-'})"
+        page = c.page if c.page is not None else f"PDF {c.page_index + 1}"
+        src = f"[{i}] ({c.doc} หน้า {page})"
         blocks.append(f"{src}\n{c.text}")
     context = "\n\n".join(blocks)
     return (f"{SYSTEM_INSTRUCT}\n\n===== ข้อมูลอ้างอิง =====\n{context}\n\n"
@@ -115,19 +118,20 @@ def search(req: SearchRequest):
             text=h.text,
             doc=h.metadata.get("doc_name", ""),
             page=_page_int(h.metadata.get("page_label")),
+            page_index=int(h.metadata.get("page_index", 0)),
             course_code=h.metadata.get("course_code"),
             chunk_type=h.metadata.get("chunk_type", ""),
             score=round(h.score, 4),
         )
         for h in hits
     ]
-    # citations: dedup (doc, page) ตามลำดับที่เจอ
+    # citations: dedup (doc, page_index) ตามลำดับที่เจอ
     seen, citations = set(), []
     for c in chunks:
-        key = (c.doc, c.page)
+        key = (c.doc, c.page_index)
         if key not in seen:
             seen.add(key)
-            citations.append(Citation(doc=c.doc, page=c.page))
+            citations.append(Citation(doc=c.doc, page=c.page, page_index=c.page_index))
 
     return SearchResponse(
         question=req.question,

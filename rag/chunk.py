@@ -228,33 +228,23 @@ def _split_big_unit(text: str, page_label, page_index) -> list[_Line]:
 
 
 def _emit_general(buf: list[_Line], chunks: list[Chunk], doc_name: str, doc_type: str) -> None:
-    """ตัดเนื้อหาทั่วไปเป็น chunk ~TARGET_TOKENS ตามขอบย่อหน้า (ซอยก้อนใหญ่ก่อน)"""
-    # จัดกลุ่มเป็นย่อหน้าตามบรรทัดว่าง แล้วซอยย่อหน้าที่ใหญ่เกิน
-    paras: list[list[_Line]] = []
-    cur: list[_Line] = []
+    """ตัดเนื้อหาทั่วไปเป็น chunk ~TARGET_TOKENS โดย "คง page ต่อบรรทัด"
+
+    แก้บั๊ก page attribution: pythainlp.util.normalize ใน clean.py ลบบรรทัดว่าง
+    ทำให้การแบ่งย่อหน้าด้วยบรรทัดว่างเดิมเห็นทั้งส่วน general เป็นย่อหน้าเดียว
+    แล้ว stamp page ของบรรทัดแรก (เช่น page_index=0) ให้ทุก chunk ทั้งที่จริงอยู่หน้าอื่น.
+    วิธีใหม่ไม่พึ่งบรรทัดว่าง: รวมบรรทัด (แต่ละบรรทัดพก page ของตัวเอง) เป็น chunk
+    ~TARGET_TOKENS และ **ตัดก้อนใหม่เมื่อข้ามหน้า** → citation แม่นต่อหน้าจริง.
+    """
+    # ซอยบรรทัดที่ใหญ่เกิน MAX_TOKENS (ตาราง/ข้อความยาว) โดยคง page ของบรรทัดนั้น
+    units: list[_Line] = []
     for ln in buf:
-        if ln.text.strip() == "":
-            if cur:
-                paras.append(cur); cur = []
+        if not ln.text.strip():
+            continue
+        if _count_tokens(ln.text) > MAX_TOKENS:
+            units.extend(_split_big_unit(ln.text, ln.page_label, ln.page_index))
         else:
-            cur.append(ln)
-    if cur:
-        paras.append(cur)
-
-    # ซอยย่อหน้าที่ใหญ่เกิน MAX_TOKENS (ตารางใหญ่/ข้อความยาว) เป็นหลายย่อหน้าเล็ก
-    split_paras: list[list[_Line]] = []
-    for para in paras:
-        ptext = "\n".join(l.text for l in para)
-        if _count_tokens(ptext) <= MAX_TOKENS:
-            split_paras.append(para)
-        else:
-            pl, pi = para[0].page_label, para[0].page_index
-            for u in _split_big_unit(ptext, pl, pi):
-                split_paras.append([u])
-    paras = split_paras
-
-    batch: list[_Line] = []
-    batch_tokens = 0
+            units.append(ln)
 
     def emit(bl: list[_Line]):
         if not bl:
@@ -262,7 +252,7 @@ def _emit_general(buf: list[_Line], chunks: list[Chunk], doc_name: str, doc_type
         text = "\n".join(l.text for l in bl).strip()
         if not text:
             return
-        idx = len([c for c in chunks if c.metadata.get("chunk_type") == "general"])
+        idx = sum(1 for c in chunks if c.metadata.get("chunk_type") == "general")
         chunks.append(Chunk(
             id=f"{doc_name}::gen::{idx:04d}",
             text=text,
@@ -276,21 +266,19 @@ def _emit_general(buf: list[_Line], chunks: list[Chunk], doc_name: str, doc_type
             },
         ))
 
-    for para in paras:
-        ptext = "\n".join(l.text for l in para)
-        ptok = _count_tokens(ptext)
-        if batch_tokens + ptok > MAX_TOKENS and batch:
+    batch: list[_Line] = []
+    btok = 0
+    for u in units:
+        ut = _count_tokens(u.text)
+        # ปิดก้อนก่อนเพิ่ม ถ้า: จะเกิน MAX_TOKENS หรือ "ข้ามหน้า" (page ต่างจากก้อนปัจจุบัน)
+        if batch and (btok + ut > MAX_TOKENS or u.page_index != batch[0].page_index):
             emit(batch)
-            # overlap: เก็บย่อหน้าท้ายไว้เริ่มก้อนใหม่ ถ้าไม่ใหญ่ไป
-            batch = []
-            batch_tokens = 0
-        batch.extend(para)
-        batch.append(_Line("", para[-1].page_label, para[-1].page_index))  # เว้นบรรทัด
-        batch_tokens += ptok
-        if batch_tokens >= TARGET_TOKENS:
+            batch, btok = [], 0
+        batch.append(u)
+        btok += ut
+        if btok >= TARGET_TOKENS:
             emit(batch)
-            batch = []
-            batch_tokens = 0
+            batch, btok = [], 0
     emit(batch)
 
 
